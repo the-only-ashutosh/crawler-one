@@ -9,15 +9,16 @@ import boto3
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 from selenium import webdriver
-import ChapterCrawler
+import Crawler as ChapterCrawler
 from twisted.internet import defer
 from scrapy.crawler import CrawlerRunner
 from scrapy.utils.log import configure_logging
+from mysql.connector import connect
 
 
 s3 = boto3.client('s3',region_name='ap-south-1a',endpoint_url='https://bucket-tkgyhr.s3.ap-south-1.amazonaws.com',aws_access_key_id='',aws_secret_access_key='') 
 options = webdriver.ChromeOptions()
-options.add_argument("start-maximized")
+# options.add_argument("start-maximized")
 options.add_argument("headless")
     #chrome to stay open
 # options.add_experimental_option("detach", True)
@@ -42,7 +43,9 @@ def image_to_base64(url,name):
     else:
          return "Don't add."
 
-mydomain = "http://localhost:3000"
+mydomain = "https://novelzone.fun"
+conn = connect(host='ls-b81e911f5f67851fbb45b6145d8806a4849fba89.cf8sy28wm0qw.ap-south-1.rds.amazonaws.com',user='ashutosh',password='DAshut##godofsp33d',database='novel')
+cursor = conn.cursor(buffered=True)
 settings={
     "LOG_LEVEL":"INFO",
     # "LOG_ENABLED":False,
@@ -70,12 +73,14 @@ async def main():
         avbooks = []
         unavbooks = []
         for book in books:
-            bookurl = book['url'].split('/b/')[1]
-            res = requests.post(url=f"{mydomain}/api/myauth/checkBook",json={'url':bookurl,'isHot':book['ishot']}).json()
-            if res['status']:
-                unavbooks.append(book)
+            bookurl = str(book['url'].split('/b/')[1])
+            query = "SELECT id FROM book WHERE bookURL=%s"
+            cursor.execute(query,[bookurl])
+            ids = cursor.fetchone()
+            if ids is not None:
+                avbooks.append({'url':book['url'],'bookId':ids[0]})
             else:
-                avbooks.append({'url':book['url'],'bookId':res['id']})
+                unavbooks.append(book)
         print(pa,i,"books sorted")
         async with aiohttp.ClientSession() as session:
             unavbooks_tasks = []
@@ -104,7 +109,7 @@ async def main():
             if imageurl != None:
                 bk['aspectRatio'] = image_to_base64(imageurl,bk["bookUrl"])
             if bk['aspectRatio'] == "Don't add.":
-                continue    
+                continue   
             bk['authId'] = requests.post(f"{mydomain}/api/myauth/addAuthor",json={"author":bk['author']}).json()
             bookid = requests.post(f"{mydomain}/api/myauth/addBook",json=bk).json()
             print(bk['title'],":",bookid)
@@ -139,9 +144,7 @@ async def main():
             print(len(chaplist),len(chaplis))
             if len(chaplis) >0:
                 processes.append({'crawler':ChapterCrawler.Crawler,'start_urls':chaplis,'book':book})
-            # else:
-            #     processes.append({'crawler':SingleChapterCrawler.Crawler,'start_urls':chaplis,'book':book})    
-
+            
         
 async def fetch_page(session, url):
     # make GET request using session
